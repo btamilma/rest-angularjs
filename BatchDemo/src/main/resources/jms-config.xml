@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:p="http://www.springframework.org/schema/p"
+	xsi:schemaLocation="
+http://www.springframework.org/schema/beans
+http://www.springframework.org/schema/beans/spring-beans-3.0.xsd">
+
+	<bean id="connectionFactory"
+		class="org.springframework.jms.connection.CachingConnectionFactory">
+		<property name="targetConnectionFactory">
+			<bean class="org.apache.activemq.ActiveMQConnectionFactory">
+				<property name="brokerURL" value="tcp://localhost.localdomain:61616" />
+				<property name="trustedPackages">
+					<list>
+						<value>org.springframework.batch.integration.partition</value>
+						<value>java.lang</value>
+						<value>org.springframework.batch.core</value>
+						<value>java.util</value>
+						<value>org.springframework.batch.item</value>
+						<value>java.sql</value>
+					</list>
+				</property>
+			</bean>
+		</property>
+		<property name="sessionCacheSize" value="10" />
+	</bean>
+
+	<bean id="requestQueue" class="org.apache.activemq.command.ActiveMQQueue">
+		<constructor-arg value="queue.request" />
+	</bean>
+
+	<bean id="requestTopic" class="org.apache.activemq.command.ActiveMQTopic">
+		<constructor-arg value="topic.demo" />
+	</bean>
+
+	<bean id="replyQueue" class="org.apache.activemq.command.ActiveMQQueue">
+		<constructor-arg value="queue.reply" />
+	</bean>
+</beans>

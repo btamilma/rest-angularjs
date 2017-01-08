@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:p="http://www.springframework.org/schema/p" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:batch="http://www.springframework.org/schema/batch" xmlns:int="http://www.springframework.org/schema/integration"
+	xmlns:int-jms="http://www.springframework.org/schema/integration/jms"
+	xsi:schemaLocation="http://www.springframework.org/schema/batch
+http://www.springframework.org/schema/batch/spring-batch.xsd
+http://www.springframework.org/schema/beans
+http://www.springframework.org/schema/beans/spring-beans.xsd
+http://www.springframework.org/schema/integration/jms
+http://www.springframework.org/schema/integration/jms/spring-integration-jms.xsd
+http://www.springframework.org/schema/integration
+http://www.springframework.org/schema/integration/spring-integration.xsd">
+
+	<!-- <import resource="classpath:jms-config.xml" /> -->
+
+	<!--Master configurations -->
+	<batch:job id="masterJob">
+		<batch:step id="masterStep">
+			<batch:partition partitioner="partitioner" handler="partitionHandler" />
+		</batch:step>
+	</batch:job>
+
+	<bean id="partitioner"
+		class="com.balatamilmani.batch.remotepartitioning.RecordsPartitioner" />
+
+	<bean id="partitionHandler"
+		class="org.springframework.batch.integration.partition.MessageChannelPartitionHandler">
+		<property name="stepName" value="simpleRecordsStep" />
+		<property name="replyChannel" ref="inMasterAggregatedChannel" />
+		<property name="gridSize" value="3" />
+		<property name="messagingOperations" ref="messagingTemplate">
+		</property>
+	</bean>
+
+	<bean id="messagingTemplate"
+		class="org.springframework.integration.core.MessagingTemplate">
+		<property name="defaultChannel" ref="outMasterAdapter" />
+		<property name="receiveTimeout" value="5000" />
+	</bean>
+
+	<!-- <int-jms:outbound-channel-adapter id="outMasterAdapter" destination="masterCommands" 
+		/> -->
+	<int:channel id="outMasterAdapter" />
+	<int:service-activator input-channel="outMasterAdapter"
+		method="postRequestToSlave" output-channel="inSlaveChannel" ref="requestSender"/>
+		
+		<bean id="requestSender" class="com.balatamilmani.batch.remotepartitioning.RequestSender"/>
+
+		<int:channel id="inMasterChannel" />
+		<!-- <int-jms:message-driven-channel-adapter id="inMasterAdapter" destination="slaveResponses" 
+			channel="inMasterChannel" /> -->
+		<int:channel id="inMasterAggregatedChannel">
+			<int:queue />
+		</int:channel>
+		<int:aggregator ref="partitionHandler" input-channel="inMasterChannel"
+			output-channel="inMasterAggregatedChannel" />
+
+<!--Master Ends -->
+
+<bean id="dataSource" class="org.apache.commons.dbcp.BasicDataSource"
+	destroy-method="close">
+	<property name="driverClassName" value="oracle.jdbc.OracleDriver" />
+	<property name="url"
+		value="jdbc:oracle:thin:@//localhost:1521/cdb1.localdomain" />
+	<property name="username" value="scott" />
+	<property name="password" value="tiger" />
+</bean>
+
+
+
+<bean id="stepExecutionRequestHandler"
+	class="org.springframework.batch.integration.partition.StepExecutionRequestHandler">
+	<property name="jobExplorer" ref="jobExplorer" />
+	<property name="stepLocator" ref="stepLocator" />
+</bean>
+
+<batch:step id="simpleRecordsStep">
+	<batch:tasklet allow-start-if-complete="true">
+		<batch:chunk reader="partitionedRecordReader" writer="simpleRecordWriter"
+			commit-interval="1" />
+	</batch:tasklet>
+</batch:step>
+
+<bean id="partitionedRecordReader"
+	class="com.balatamilmani.batch.remotepartitioning.PartitionedRecordReader" />
+<bean id="simpleRecordWriter"
+	class="com.balatamilmani.batch.remotepartitioning.SimpleRecordWriter" />
+
+<int:channel id="inSlaveChannel" />
+
+<!-- <int-jms:message-driven-channel-adapter id="inSlaveAdapter" destination="masterCommands" 
+	channel="inSlaveChannel" /> -->
+
+<int:service-activator ref="stepExecutionRequestHandler"
+	input-channel="inSlaveChannel" output-channel="outSlaveChannel" />
+
+<int:channel id="outSlaveChannel" />
+<int:service-activator input-channel="outSlaveChannel"
+	method="postResponseToMaster" output-channel="inMasterChannel" ref="responseSender"/>
+	<bean id="responseSender"
+		class="com.balatamilmani.batch.remotepartitioning.ResponseSender" />
+
+	<!-- <int-jms:outbound-channel-adapter id="outSlaveAdapter" destination="slaveResponses" 
+		channel="outSlaveChannel" /> -->
+
+	<!--Slave configuration -->
+
+	<bean id="jobOperator"
+		class="org.springframework.batch.core.launch.support.SimpleJobOperator"
+		p:jobLauncher-ref="jobLauncher" p:jobExplorer-ref="jobExplorer"
+		p:jobRepository-ref="jobRepository" p:jobRegistry-ref="jobRegistry" />
+	<bean id="jobExplorer"
+		class="org.springframework.batch.core.explore.support.JobExplorerFactoryBean"
+		p:dataSource-ref="dataSource" />
+	<bean id="jobRegistry"
+		class="org.springframework.batch.core.configuration.support.MapJobRegistry" />
+	<bean
+		class="org.springframework.batch.core.configuration.support.JobRegistryBeanPostProcessor">
+		<property name="jobRegistry" ref="jobRegistry" />
+	</bean>
+	<bean id="jobLauncher"
+		class="org.springframework.batch.core.launch.support.SimpleJobLauncher">
+		<property name="jobRepository" ref="jobRepository" />
+	</bean>
+	
+	<bean id="stepLocator"
+		class="org.springframework.batch.integration.partition.BeanFactoryStepLocator" />
+		
+		<job-repository id="jobRepository" transaction-manager="transactionManager"
+data-source="dataSource" isolation-level-for-create="READ_COMMITTED"/>
+
+	<!-- <bean id="jobRepository"
+		class="org.springframework.batch.core.repository.support.JobRepositoryFactoryBean"
+		p:dataSource-ref="dataSource" p:transactionManager-ref="transactionManager" p:isolationLevelForCreate="READ_COMMITTED"/> -->
+
+	<bean id="transactionManager"
+		class="org.springframework.jdbc.datasource.DataSourceTransactionManager">
+		<property name="dataSource" ref="dataSource" />
+	</bean>
+</beans>

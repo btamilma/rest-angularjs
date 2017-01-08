@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:p="http://www.springframework.org/schema/p" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:jdbc="http://www.springframework.org/schema/jdbc" xmlns:batch="http://www.springframework.org/schema/batch"
+	xmlns:int="http://www.springframework.org/schema/integration"
+	xmlns:int-jms="http://www.springframework.org/schema/integration/jms"
+	xsi:schemaLocation="http://www.springframework.org/schema/batch
+http://www.springframework.org/schema/batch/spring-batch-2.1.xsd
+http://www.springframework.org/schema/beans
+http://www.springframework.org/schema/beans/spring-beans-3.0.xsd
+http://www.springframework.org/schema/integration/jms
+http://www.springframework.org/schema/integration/jms/spring-integration-jms.xsd
+http://www.springframework.org/schema/integration
+http://www.springframework.org/schema/integration/spring-integration.xsd
+http://www.springframework.org/schema/jdbc
+http://www.springframework.org/schema/jdbc/spring-jdbc.xsd
+">
+
+	<import resource="classpath:jms-config.xml" />
+	<import resource="classpath:dataAccess.xml" />
+
+	<!--Master configurations -->
+	<batch:job id="masterJob">
+<!-- 		<batch:listeners>
+			<batch:listener ref="jobListener" />
+		</batch:listeners> -->
+		<batch:step id="masterStep">
+			<batch:partition partitioner="partitioner" handler="partitionHandler" />
+		</batch:step>
+	</batch:job>
+
+	<bean id="partitioner"
+		class="com.balatamilmani.batch.remotepartitioning.RecordsPartitioner">
+		<property name="gridSize" value="2" />
+	</bean>
+
+	<bean id="partitionHandler"
+		class="org.springframework.batch.integration.partition.MessageChannelPartitionHandler">
+		<property name="stepName" value="simpleRecordsStep" />
+		<property name="replyChannel" ref="inMasterAggregatedChannel" />
+		<property name="gridSize" value="3" />
+		<property name="messagingOperations" ref="messagingTemplate">
+		</property>
+	</bean>
+
+	<bean id="messagingTemplate" class="org.springframework.integration.core.MessagingTemplate">
+		<property name="defaultChannel" ref="outStepExecutionReq" />
+		<!--default value 0 - receive calls will be waiting forever  -->
+		<property name="receiveTimeout" value="50000" />
+	</bean>
+
+<!-- 	<bean id="jobListener"
+		class="io.spring.remotepartitioningmaster.listener.JobDurationListener" /> -->
+
+	<int:channel id="outStepExecutionReq" />
+
+	<int-jms:outbound-channel-adapter
+		connection-factory="connectionFactory" channel="outStepExecutionReq"
+		destination-name="queue.request" />
+
+<!-- 	<int-jms:outbound-gateway request-channel="outStepExecutionReq" request-destination="requestQueue" 
+		connection-factory="connectionFactory" /> -->
+
+	<int-jms:message-driven-channel-adapter
+		connection-factory="connectionFactory" channel="replyChannel"
+		destination-name="queue.reply" />
+
+<!-- 	<int-jms:inbound-gateway request-channel="replyChannel" request-destination="replyQueue" 
+		connection-factory="connectionFactory" /> -->
+
+
+	<int:channel id="replyChannel" />
+
+	<int:channel id="inMasterAggregatedChannel">
+		<int:queue />
+	</int:channel>
+	<int:aggregator ref="partitionHandler" input-channel="replyChannel"
+		output-channel="inMasterAggregatedChannel" />
+
+	<!--Master Ends -->
+
+	<!-- <bean id="org.h2.tools.Server" class="org.h2.tools.Server" lazy-init="false" 
+		factory-method="createTcpServer" init-method="start" destroy-method="stop"> 
+		<constructor-arg> <array> <value>-tcp</value> <value>-tcpAllowOthers</value> 
+		<value>-tcpPort</value> <value>8043</value> <value>-properties</value> <value>"~/partition-test"</value> 
+		</array> </constructor-arg> </bean> <jdbc:initialize-database data-source="dataSource"> 
+		<jdbc:script location="classpath:h2-purge.sql" /> </jdbc:initialize-database> 
+		<bean id="dataSource" class="org.springframework.jdbc.datasource.DriverManagerDataSource"> 
+		<property name="driverClassName" value="org.h2.Driver" /> <property name="url" 
+		value="jdbc:h2:tcp://localhost:8043/~/partition-test" /> <property name="username" 
+		value="sa" /> <property name="password" value="" /> </bean> -->
+
+	<bean id="dataSource" class="org.apache.commons.dbcp.BasicDataSource"
+		destroy-method="close">
+		<property name="driverClassName" value="oracle.jdbc.OracleDriver" />
+		<property name="url"
+			value="jdbc:oracle:thin:@//localhost:1521/cdb1.localdomain" />
+		<property name="username" value="scott" />
+		<property name="password" value="tiger" />
+	</bean>
+
+	<bean id="stepExecutionRequestHandler"
+		class="org.springframework.batch.integration.partition.StepExecutionRequestHandler">
+		<property name="jobExplorer" ref="jobExplorer" />
+		<property name="stepLocator" ref="stepLocator" />
+	</bean>
+
+	<!-- <int-jms:outbound-channel-adapter id="outSlaveAdapter" destination="slaveResponses" 
+		channel="outSlaveChannel" /> -->
+
+	<!--Slave configuration -->
+
+	<bean id="jobOperator"
+		class="org.springframework.batch.core.launch.support.SimpleJobOperator"
+		p:jobLauncher-ref="jobLauncher" p:jobExplorer-ref="jobExplorer"
+		p:jobRepository-ref="jobRepository" p:jobRegistry-ref="jobRegistry" />
+		
+	<bean id="jobExplorer"
+		class="org.springframework.batch.core.explore.support.JobExplorerFactoryBean"
+		p:dataSource-ref="dataSource" />
+		
+	<bean id="jobRegistry"
+		class="org.springframework.batch.core.configuration.support.MapJobRegistry" />
+		
+	<bean
+		class="org.springframework.batch.core.configuration.support.JobRegistryBeanPostProcessor">
+		<property name="jobRegistry" ref="jobRegistry" />
+	</bean>
+	
+	<bean id="jobLauncher"
+		class="org.springframework.batch.core.launch.support.SimpleJobLauncher">
+		<property name="jobRepository" ref="jobRepository" />
+	</bean>
+
+	<bean id="stepLocator"
+		class="org.springframework.batch.integration.partition.BeanFactoryStepLocator" />
+
+	<batch:job-repository id="jobRepository"
+		transaction-manager="transactionManager" data-source="dataSource"
+		isolation-level-for-create="READ_COMMITTED" />
+
+	<!-- <bean id="jobRepository" class="org.springframework.batch.core.repository.support.JobRepositoryFactoryBean" 
+		p:dataSource-ref="dataSource" p:transactionManager-ref="transactionManager" 
+		p:isolationLevelForCreate="READ_COMMITTED"/> -->
+
+	<bean id="transactionManager"
+		class="org.springframework.jdbc.datasource.DataSourceTransactionManager">
+		<property name="dataSource" ref="dataSource" />
+	</bean>
+</beans>

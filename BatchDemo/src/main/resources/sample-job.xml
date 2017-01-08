@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:p="http://www.springframework.org/schema/p" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:jdbc="http://www.springframework.org/schema/jdbc" xmlns:batch="http://www.springframework.org/schema/batch"
+	xmlns:int="http://www.springframework.org/schema/integration"
+	xmlns:int-jms="http://www.springframework.org/schema/integration/jms"
+	xsi:schemaLocation="http://www.springframework.org/schema/batch
+http://www.springframework.org/schema/batch/spring-batch-2.1.xsd
+http://www.springframework.org/schema/beans
+http://www.springframework.org/schema/beans/spring-beans-3.0.xsd
+http://www.springframework.org/schema/integration/jms
+http://www.springframework.org/schema/integration/jms/spring-integration-jms-2.0.xsd
+http://www.springframework.org/schema/integration
+http://www.springframework.org/schema/integration/spring-integration.xsd
+http://www.springframework.org/schema/jdbc
+http://www.springframework.org/schema/jdbc/spring-jdbc.xsd
+">
+
+
+	<import resource="dataAccess.xml" />
+	<import resource="jobRepo.xml" />
+
+
+	<!--Master configurations -->
+	<batch:job id="empJob">
+		<batch:step id="step1" next="step2">
+			<batch:tasklet>
+				<batch:chunk reader="itemReader" writer="cvsFileItemWriter"
+					commit-interval="1">
+				</batch:chunk>
+			</batch:tasklet>
+		</batch:step>
+		<batch:split id="step2">
+			<batch:flow>
+				<batch:step id="step2.1">
+					<batch:tasklet ref="zipCreatorTasklet" />
+				</batch:step>
+			</batch:flow>
+			<batch:flow>
+				<batch:step id="step2.2">
+					<batch:tasklet ref="dummyTasklet" />
+				</batch:step>
+			</batch:flow>
+		</batch:split>
+	</batch:job>
+
+	<bean id="itemReader"
+		class="org.springframework.batch.item.database.JdbcCursorItemReader"
+		scope="step">
+		<property name="dataSource" ref="dataSource" />
+		<property name="sql" value="select empno, ename, job from emp" />
+		<property name="rowMapper">
+			<bean class="com.balatamilmani.batch.sample.EmpMapper" />
+		</property>
+	</bean>
+
+	<bean id="cvsFileItemWriter" class="org.springframework.batch.item.file.FlatFileItemWriter"
+		scope="step">
+		<!-- write to this csv file -->
+		<property name="resource"
+			value="file:#{jobParameters['dirPath']}/employee.csv" />
+		<property name="shouldDeleteIfExists" value="true" />
+		<property name="lineAggregator">
+			<bean
+				class="org.springframework.batch.item.file.transform.DelimitedLineAggregator">
+				<property name="delimiter" value="," />
+				<property name="fieldExtractor">
+					<bean
+						class="org.springframework.batch.item.file.transform.BeanWrapperFieldExtractor">
+						<property name="names" value="empNo, eName, job" />
+					</bean>
+				</property>
+			</bean>
+		</property>
+	</bean>
+
+
+	<bean id="zipCreatorTasklet" class="com.balatamilmani.batch.sample.ZipCreatorTasklet" />
+	<bean id="dummyTasklet" class="com.balatamilmani.batch.sample.DummyTasklet" />
+
+
+
+</beans>
